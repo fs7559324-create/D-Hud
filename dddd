@@ -1,0 +1,169 @@
+-- เรียกใช้ Orion Library สำหรับสร้างหน้าต่าง UI
+local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+local Window = OrionLib:MakeWindow({Name = "Aimbot & ESP Hub", HidePremium = false, SaveConfig = true, ConfigFolder = "AimbotHub"})
+
+-- ==========================================
+-- ตัวแปรตั้งค่าระบบ
+-- ==========================================
+_G.AimbotEnabled = false       -- 1 & 2. ปิด/เปิด Aimbot
+_G.ESPNameEnabled = false      -- 3. ปิด/เปิด ESP ชื่อ
+_G.TargetPart = "Head"         -- 4. จุดที่เลือกล็อก (Head = หัว, HumanoidRootPart = ลำตัว)
+_G.Whitelist = {}              -- 5. รายชื่อคนที่ไม่ล็อก (Whitelist)
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+-- ฟังก์ชันเช็กว่าคนนี้อยู่ในรายชื่อยกเว้น (Whitelist) หรือไม่
+local function isWhitelisted(playerName)
+    for _, name in pairs(_G.Whitelist) do
+        if string.lower(name) == string.lower(playerName) then return true end
+    end
+    return false
+end
+
+-- ==========================================
+-- ระบบ Aimbot (ล็อกเป้าคนที่อยู่ใกล้เมาส์ที่สุด)
+-- ==========================================
+local function GetClosestPlayer()
+    local closestDist = math.huge
+    local closestTarget = nil
+    local mouseLocation = UserInputService:GetMouseLocation()
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(_G.TargetPart) and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+            -- เช็กว่าไม่ใช่คนที่เราตั้งค่าว่าห้ามล็อก
+            if not isWhitelisted(player.Name) and not isWhitelisted(player.DisplayName) then
+                local targetPos, onScreen = Camera:WorldToViewportPoint(player.Character[_G.TargetPart].Position)
+                
+                if onScreen then
+                    local dist = (Vector2.new(targetPos.X, targetPos.Y) - mouseLocation).Magnitude
+                    if dist < closestDist then
+                        closestDist = dist
+                        closestTarget = player.Character
+                    end
+                end
+            end
+        end
+    end
+    return closestTarget
+end
+
+-- สั่งให้กล้องหันไปหาเป้าหมายตลอดเวลาเมื่อกดคลิกขวา (และเปิดระบบอยู่)
+RunService.RenderStepped:Connect(function()
+    if _G.AimbotEnabled then
+        -- กดคลิกขวา (MouseButton2) ค้างไว้เพื่อล็อกเป้า
+        if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+            local LockedTarget = GetClosestPlayer()
+            if LockedTarget and LockedTarget:FindFirstChild(_G.TargetPart) then
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, LockedTarget[_G.TargetPart].Position)
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- ระบบ ESP (แสดงชื่อผู้เล่น)
+-- ==========================================
+local function UpdateESP()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+            local espName = "ESP_" .. player.Name
+            local existingEsp = player.Character:FindFirstChild(espName)
+
+            if _G.ESPNameEnabled then
+                if not existingEsp then
+                    -- สร้างป้ายชื่อบนหัว
+                    local billboard = Instance.new("BillboardGui")
+                    billboard.Name = espName
+                    billboard.Adornee = player.Character.Head
+                    billboard.Size = UDim2.new(0, 100, 0, 50)
+                    billboard.StudsOffset = Vector3.new(0, 2, 0)
+                    billboard.AlwaysOnTop = true -- มองทะลุกำแพงได้
+
+                    local text = Instance.new("TextLabel")
+                    text.Parent = billboard
+                    text.BackgroundTransparency = 1
+                    text.Size = UDim2.new(1, 0, 1, 0)
+                    text.Text = player.Name
+                    text.TextColor3 = Color3.new(1, 0, 0) -- สีตัวหนังสือ (สีแดง)
+                    text.TextStrokeTransparency = 0 -- มีขอบดำ
+                    text.TextSize = 14
+                    
+                    billboard.Parent = player.Character
+                end
+            else
+                -- ถ้าปิด ESP ให้ลบป้ายทิ้ง
+                if existingEsp then existingEsp:Destroy() end
+            end
+        end
+    end
+end
+
+RunService.RenderStepped:Connect(UpdateESP)
+
+-- ==========================================
+-- สร้างหน้าต่าง UI ควบคุม (เมนู)
+-- ==========================================
+local Tab = Window:MakeTab({
+	Name = "ตั้งค่า",
+	Icon = "rbxassetid://4483345998",
+	PremiumOnly = false
+})
+
+-- 1 & 2: ปุ่มเปิด/ปิด ล็อกเป้า
+Tab:MakeToggle({
+	Name = "เปิด Aimbot (กดคลิกขวาค้างเพื่อล็อก)",
+	Default = false,
+	Callback = function(Value)
+		_G.AimbotEnabled = Value
+	end    
+})
+
+-- 3: ปุ่มเปิด/ปิด ESP ชื่อผู้เล่น
+Tab:MakeToggle({
+	Name = "เปิด ESP Name (แสดงชื่อมองทะลุกำแพง)",
+	Default = false,
+	Callback = function(Value)
+		_G.ESPNameEnabled = Value
+	end    
+})
+
+-- 4: เลือกจุดล็อก (หัว หรือ ลำตัว)
+Tab:MakeDropdown({
+	Name = "เลือกว่าจะล็อกตรงไหน",
+	Options = {"Head", "HumanoidRootPart"},
+	Default = "Head",
+	Callback = function(Value)
+		_G.TargetPart = Value -- ถ้าเลือก Head = ยิงหัว, HumanoidRootPart = ยิงตัว
+	end    
+})
+
+-- 5: กล่องใส่ชื่อคนที่ไม่ต้องการล็อก
+Tab:MakeTextbox({
+	Name = "ใส่ชื่อคนที่ไม่ให้ล็อก (Whitelist)",
+	Default = "",
+	TextDisappear = true,
+	Callback = function(Value)
+        table.insert(_G.Whitelist, Value)
+        OrionLib:MakeNotification({
+            Name = "เพิ่มชื่อเรียบร้อย",
+            Content = "ระบบจะไม่ล็อกเป้าหมาย: " .. Value,
+            Image = "rbxassetid://4483345998",
+            Time = 3
+        })
+	end	
+})
+
+-- ปุ่มเคลียร์รายชื่อคนที่ไม่ล็อก (เผื่อพิมพ์ผิด)
+Tab:MakeButton({
+	Name = "ล้างรายชื่อ Whitelist ทั้งหมด",
+	Callback = function()
+      		_G.Whitelist = {}
+            OrionLib:MakeNotification({Name="สำเร็จ", Content="รีเซ็ตรายชื่อยกเว้นแล้ว", Time=3})
+  	end    
+})
+
+OrionLib:Init()
